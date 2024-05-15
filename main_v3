@@ -1,0 +1,217 @@
+import cv2
+import numpy as np
+import os
+
+# Contadores para contar el número de frames sin detectar líneas
+frames_sin_lineas_izquierdas = 0
+frames_sin_lineas_derechas = 0
+
+# Listas para almacenar las líneas de los últimos 10 frames
+ultimas_lineas_izquierdas = []
+ultimas_lineas_derechas = []
+
+
+def detectar_carriles(frame):
+    global ultimas_lineas_izquierdas, ultimas_lineas_derechas, frames_sin_lineas_izquierdas, frames_sin_lineas_derechas
+
+    # Convertir el frame a escala de grises
+    gris = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Aplicar desenfoque gaussiano para reducir el ruido
+    desenfoque = cv2.GaussianBlur(gris, (5, 5), 0)
+
+    # Establece el umbral
+
+    altura, ancho = frame.shape[:2]
+    mitad_ancho = ancho // 2
+
+    imagen_izquierda = desenfoque[:, :mitad_ancho]
+    imagen_derecha = desenfoque[:, mitad_ancho:]
+
+    imagen_recortada = desenfoque[int(2 * altura / 3) + 100:altura - 100, int(1.3 * ancho / 5):int(4 * ancho / 5) - 200]
+    # Encuentra los puntos mínimo y máximo del histograma
+    altura, ancho = imagen_recortada.shape[:2]
+    mitad_ancho = ancho // 2
+
+    im1 = imagen_recortada[:, :mitad_ancho]
+    im2 = imagen_recortada[:, mitad_ancho:]
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(im1)
+    umbral1 = (max_val + np.mean(im1)) / 2
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(im2)
+    umbral2 = (max_val + np.mean(im2)) / 2
+
+    # Aplica un umbral solo a la mitad izquierda de la imagen
+    _, imagen_izquierda = cv2.threshold(imagen_izquierda, umbral1, 255, cv2.THRESH_BINARY)
+    # Aplica un umbral solo a la mitad derecha de la imagen
+    _, imagen_derecha = cv2.threshold(imagen_derecha, umbral2, 255, cv2.THRESH_BINARY)
+
+    # Une las imagenes umbralizadas
+    nueva_imagen = cv2.hconcat([imagen_izquierda, imagen_derecha])
+
+    # Aplica una operación morfológica de apertura para eliminar los puntos blancos pequeños
+    nueva_imagen = cv2.morphologyEx(nueva_imagen, cv2.MORPH_OPEN, kernel=np.ones((3, 3), np.uint8))
+
+    cv2.imshow('Imagen polarizada', cv2.resize(nueva_imagen, (960, 540)))
+
+    desenfoque = nueva_imagen
+
+    # Detectar bordes usando el operador de Canny
+    bordes = cv2.Canny(desenfoque, 50, 100)
+
+    # Definir una región de interés (ROI) trapezoidal
+    altura, ancho = frame.shape[:2]
+    ROI_VERTICES = [(0.1, 0.75), (0.9, 0.75), (1, 0.95), (0, 0.95)]  # Definir vértices del ROI
+    puntos_roi = np.array([[(ancho * x, altura * y) for x, y in ROI_VERTICES]], dtype=np.int32)
+    mascara = np.zeros_like(gris)
+    cv2.fillPoly(mascara, puntos_roi, 255)
+    imagen_roi = cv2.bitwise_and(bordes, mascara)
+
+    # Detectar líneas usando la transformada de Hough
+    lineas = cv2.HoughLinesP(imagen_roi, 1, np.pi / 180, 50, minLineLength=50, maxLineGap=100)
+
+    # Separar las líneas en grupos izquierda y derecha
+    lineas_izquierdas = []
+    lineas_derechas = []
+    if lineas is not None:  # Verificar si se detectaron líneas
+        for linea in lineas:
+            x1, y1, x2, y2 = linea[0]
+            if (x2 - x1) != 0:
+                pendiente = (y2 - y1) / (x2 - x1) if x2 != x1 else float('inf')  # Manejar caso de pendiente infinita
+                if pendiente < -0.5 and x1<=ancho/2-100:
+                    lineas_izquierdas.append(linea[0])
+                elif pendiente > 0.5 and x1>=ancho/2+100:
+                    lineas_derechas.append(linea[0])
+    # Verificar si se detectaron líneas izquierdas y actualizar el contador
+    if lineas_izquierdas:
+        frames_sin_lineas_izquierdas = 0
+    else:
+        frames_sin_lineas_izquierdas += 1
+    # Verificar si se detectaron líneas derechas y actualizar el contador
+    if lineas_derechas:
+        frames_sin_lineas_derechas = 0
+    else:
+        frames_sin_lineas_derechas += 1
+
+
+    # Promediar las coordenadas de las líneas izquierda y derecha si se detectaron
+    if lineas_izquierdas:
+        promedio_izquierdo = np.mean(lineas_izquierdas, axis=0, dtype=np.int32)
+        # Histórico de las X últimas líneas
+        ultimas_lineas_izquierdas.append(promedio_izquierdo)
+        if len(ultimas_lineas_izquierdas) > 10:
+            ultimas_lineas_izquierdas.pop(0)  # Eliminar el primer elemento si hay más de X elementos
+    if lineas_derechas:
+        promedio_derecho = np.mean(lineas_derechas, axis=0, dtype=np.int32)
+        # Histórico de las X últimas líneas
+        ultimas_lineas_derechas.append(promedio_derecho)
+        if len(ultimas_lineas_derechas) > 10:
+            ultimas_lineas_derechas.pop(0)  # Eliminar el primer elemento si hay más de X elementos
+
+    # Dibujar líneas solo si no han pasado X frames sin detectar líneas
+    if frames_sin_lineas_izquierdas < 30 and ultimas_lineas_izquierdas:
+        lineas_definitivas_izquierdas = np.mean(ultimas_lineas_izquierdas, axis=0, dtype=np.int32)
+        x1, y1, x2, y2 = lineas_definitivas_izquierdas
+        cv2.line(frame, (x1, y1), (x2, y2), (255, 0, 255), 5)
+    elif ultimas_lineas_izquierdas:
+        x1, y1, x2, y2 = ultimas_lineas_izquierdas[0]
+        cv2.line(frame, (x1, y1), (x2, y2), (255, 0, 255), 5)
+
+
+
+    # Extender las líneas solo dentro del rango de la ROI
+    pendiente = (y2 - y1) / (x2 - x1) if x2 != x1 else float('inf')  # Manejar caso de pendiente infinita
+    if pendiente != 0:  # Evitar división por cero
+        interseccion_superior = int(altura * 0.75)
+        interseccion_inferior = int(altura * 0.95)
+        interseccion_superior_x = int((interseccion_superior - y1) / pendiente + x1)
+        interseccion_inferior_x = int((interseccion_inferior - y1) / pendiente + x1)
+        cv2.line(frame, (interseccion_superior_x, interseccion_superior),
+                (interseccion_inferior_x, interseccion_inferior), (255, 0, 255), 5)
+        vertices=np.array([[interseccion_inferior_x,interseccion_inferior],[interseccion_superior_x,interseccion_superior]])
+
+    x_sup_izq = interseccion_superior_x
+    x_inf_izq = interseccion_inferior_x
+
+    if frames_sin_lineas_derechas < 10 and ultimas_lineas_derechas:
+        lineas_definitivas_derechas = np.mean(ultimas_lineas_derechas, axis=0, dtype=np.int32)
+        x1, y1, x2, y2 = lineas_definitivas_derechas
+        cv2.line(frame, (x1, y1), (x2, y2), (255, 0, 255), 5)
+    elif ultimas_lineas_derechas:
+        x1, y1, x2, y2 = ultimas_lineas_derechas[0]
+        cv2.line(frame, (x1, y1), (x2, y2), (255, 0, 255), 5)
+
+    # Extender las líneas solo dentro del rango de la ROI
+    pendiente = (y2 - y1) / (x2 - x1) if x2 != x1 else float('inf')  # Manejar caso de pendiente infinita
+    if pendiente != 0:  # Evitar división por cero
+        interseccion_superior = int(altura * 0.75)
+        interseccion_inferior = int(altura * 0.95)
+        interseccion_superior_x = int((interseccion_superior - y1) / pendiente + x1)
+        interseccion_inferior_x = int((interseccion_inferior - y1) / pendiente + x1)
+        cv2.line(frame, (interseccion_superior_x, interseccion_superior),
+                (interseccion_inferior_x, interseccion_inferior), (255, 0, 255), 5)
+        vertices= np.concatenate((vertices,np.array([[ interseccion_superior_x, interseccion_superior],[interseccion_inferior_x, interseccion_inferior]])))
+
+    x_sup_der = interseccion_superior_x
+    x_inf_der = interseccion_inferior_x
+
+    # Dibujar carril
+    frame_cpy = frame.copy()
+    cv2.fillPoly(frame, [vertices], color=(0, 0, 255))
+    alpha = 0.4
+    frame = cv2.addWeighted(frame, alpha, frame_cpy, 1 - alpha, gamma=0)
+
+    x_sup_mid = int((x_sup_izq+x_sup_der)*0.5)
+    x_inf_mid = int((x_inf_izq+x_inf_der)*0.5)
+    cv2.line(frame, (x_sup_mid, interseccion_superior),
+                (x_inf_mid, interseccion_inferior), (255, 0, 255), 1)
+    
+    offset = x_inf_mid - int(ancho/2) + 70 # ajustar según vídeo
+    #print(offset)
+    if abs(offset)>200:
+        cv2.putText(frame,'CAMBIO DE CARRIL', 
+            (int(ancho*0.25),int(altura*0.1)), #bottomLeftCornerOfText
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            3, #fontScale
+            (0,255,255), #fontColor
+            5, #thickness
+            2) #lineType
+
+
+    # Dibujar la zona de interés con una línea discontínua verde
+    cv2.polylines(frame, [puntos_roi], isClosed=True, color=(0, 255, 0), thickness=2)
+
+    return frame
+
+
+
+# Obtener la ruta del directorio actual donde se encuentra el archivo de Python
+ruta_actual = os.path.dirname(os.path.abspath(__file__))
+
+# Unir la ruta actual con el nombre del video
+video_ruta = os.path.join(ruta_actual, 'video.mp4')
+
+# Capturar video desde el archivo de video
+cap = cv2.VideoCapture(video_ruta)
+
+# Crear una ventana para mostrar las imágenes
+cv2.namedWindow('Reproduccion', cv2.WINDOW_NORMAL)
+
+while cap.isOpened():
+    # Capturar frame a frame
+    ret, frame = cap.read()
+    if ret:
+        frame_con_carriles = detectar_carriles(frame)
+
+        # Mostrar la imagen en la ventana 'Reproduccion'
+        cv2.imshow('Reproduccion', frame_con_carriles)
+
+        # Esperar aproximadamente 16 ms para lograr 60 fps
+        if cv2.waitKey(1) == ord(
+                's'):  # ESTE TIEMPO DE ESPERA HABRÁ QUE AJUSTARLO SEGÚN EL TIEMPO DE PROCESAMIENTO Y DEMÁS PARA LOGAR QUE SE VEA COMO EN TIEMPO REAL
+            break
+    else:
+        break
+
+# Liberar la captura de video y cerrar todas las ventanas
+cap.release()
+cv2.destroyAllWindows()
