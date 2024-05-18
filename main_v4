@@ -10,15 +10,17 @@ frames_sin_lineas_derechas = 0
 # Listas para almacenar las líneas de los últimos 10 frames
 ultimas_lineas_izquierdas = []
 ultimas_lineas_derechas = []
-N=60 # número de frames guardados
+N=30 # número de frames guardados
 
 t_i = 0
 t_d = 0
 t = 0
 
 # Distancia mínima y máxima entre líneas
-d_min=700
+d_min=800
 d_max=1000
+
+
 
 
 def detectar_carriles(frame):
@@ -48,25 +50,25 @@ def detectar_carriles(frame):
     #cv2.imshow('Imagen', imagen_desenfocada)
 
     ## Aplicación de ecualización del histograma
-    #imagen_ecualizada_i = cv2.equalizeHist(imagen_desenfocada[:, :960 // 2])
-    #imagen_ecualizada_d = cv2.equalizeHist(imagen_desenfocada[:, 960 // 2:])
-    #imagen_ecualizada = cv2.hconcat([imagen_ecualizada_i, imagen_ecualizada_d])
+    imagen_ecualizada_i = cv2.equalizeHist(imagen_desenfocada[:, :960 // 2])
+    imagen_ecualizada_d = cv2.equalizeHist(imagen_desenfocada[:, 960 // 2:])
+    imagen_ecualizada = cv2.hconcat([imagen_ecualizada_i, imagen_ecualizada_d])
     #cv2.imshow('Imagen', imagen_ecualizada)
 
     # Función cúbica
-    #imagen_float_i = np.float32(imagen_ecualizada_i)
-    #f_cubica_i = (imagen_float_i ** 3) / (255 ** 2)
-    #imagen_f_cubica_i = cv2.normalize(f_cubica_i, None, 0, 255, cv2.NORM_MINMAX)
-    #imagen_f_cubica_i = np.uint8(imagen_f_cubica_i)
+    imagen_float_i = np.float32(imagen_ecualizada_i)
+    f_cubica_i = (imagen_float_i ** 3) / (255 ** 2)
+    imagen_f_cubica_i = cv2.normalize(f_cubica_i, None, 0, 255, cv2.NORM_MINMAX)
+    imagen_f_cubica_i = np.uint8(imagen_f_cubica_i)
 
-    #imagen_float_d = np.float32(imagen_ecualizada_d)
-    #f_cubica_d = (imagen_float_d ** 3) / (255 ** 2)
-    #imagen_f_cubica_d = cv2.normalize(f_cubica_d, None, 0, 255, cv2.NORM_MINMAX)
-    #imagen_f_cubica_d = np.uint8(imagen_f_cubica_d)
+    imagen_float_d = np.float32(imagen_ecualizada_d)
+    f_cubica_d = (imagen_float_d ** 3) / (255 ** 2)
+    imagen_f_cubica_d = cv2.normalize(f_cubica_d, None, 0, 255, cv2.NORM_MINMAX)
+    imagen_f_cubica_d = np.uint8(imagen_f_cubica_d)
 
     #### Cambio:
-    imagen_f_cubica_i = imagen_desenfocada[:, :960 // 2]
-    imagen_f_cubica_d = imagen_desenfocada[:, 960 // 2:]
+    #imagen_f_cubica_i = imagen_desenfocada[:, :960 // 2]
+    #imagen_f_cubica_d = imagen_desenfocada[:, 960 // 2:]
 
 
     # Encuentra los puntos mínimo y máximo del histograma
@@ -105,6 +107,20 @@ def detectar_carriles(frame):
             if (x2 - x1) != 0:
                 pendiente = (y2 - y1) / (x2 - x1)
                 if pendiente < -0.45 or np.isinf(pendiente):
+                    #Cambio:
+                    try:
+                        xa1, ya1, xa2, ya2 = ultimas_lineas_izquierdas[-1]
+                    except:
+                        xa1=x1
+                        xa2=x2
+                    d = ((xa1 + xa2) / 2) - ((x1 + x2) / 2)
+                    print(d)
+                    if d < 50:
+                        x1n = xa1 + 0.1 * x1
+                        x2n = xa2 + 0.1 * x2
+                        linea[0] = [x1n, y1, x2n, y2]
+
+                    frames_sin_lineas_izquierdas=0
                     lineas_izquierdas.append(linea[0])
 
                     # Promediar las coordenadas de las líneas izquierda y derecha si se detectaron
@@ -140,6 +156,16 @@ def detectar_carriles(frame):
             if (x2 - x1) != 0:
                 pendiente = (y2 - y1) / (x2 - x1)
                 if pendiente > 0.45 or np.isinf(pendiente):
+                    # Cambio:
+                    if ultimas_lineas_derechas != []:
+                        xa1, ya1, xa2, ya2 = ultimas_lineas_derechas[-1]
+                        x1=x1 + ancho // 2
+                        x2=x2+ancho//2
+                        d = ((xa1 + xa2) / 2) - ((x1 + x2) / 2)
+                        if d>50:
+                            x1n = xa1-0.1*x1
+                            x2n = xa2-0.1*x2
+                            linea[0]=[x1n,y1,x2n,y2]
                     frames_sin_lineas_derechas = 0
                     lineas_derechas.append(linea[0])
 
@@ -289,7 +315,7 @@ def detectar_carriles(frame):
 ruta_actual = os.path.dirname(os.path.abspath(__file__))
 
 # Unir la ruta actual con el nombre del video
-video_ruta = os.path.join(ruta_actual, 'video.mp4')
+video_ruta = os.path.join(ruta_actual, 'video3.mp4')
 
 # Capturar video desde el archivo de video
 cap = cv2.VideoCapture(video_ruta)
@@ -297,14 +323,19 @@ cap = cv2.VideoCapture(video_ruta)
 # Crear una ventana para mostrar las imágenes
 cv2.namedWindow('Reproduccion', cv2.WINDOW_NORMAL)
 
+k = 0
 while cap.isOpened():
     # Capturar frame a frame
     ret, frame = cap.read()
-    if ret:
-        frame_con_carriles = detectar_carriles(frame)
 
-        # Mostrar la imagen en la ventana 'Reproduccion'
-        cv2.imshow('Reproduccion', frame_con_carriles)
+    if ret:
+        k=k+1
+        if k==10:
+            k=0
+            frame_con_carriles = detectar_carriles(frame)
+
+            # Mostrar la imagen en la ventana 'Reproduccion'
+            cv2.imshow('Reproduccion', frame_con_carriles)
 
         if cv2.waitKey(1) == ord('s'):
             break
