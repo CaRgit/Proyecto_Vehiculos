@@ -1,0 +1,316 @@
+import cv2
+import numpy as np
+import os
+import time
+
+# Contadores para contar el número de frames sin detectar líneas
+frames_sin_lineas_izquierdas = 0
+frames_sin_lineas_derechas = 0
+
+# Listas para almacenar las líneas de los últimos 10 frames
+ultimas_lineas_izquierdas = []
+ultimas_lineas_derechas = []
+N=60 # número de frames guardados
+
+t_i = 0
+t_d = 0
+t = 0
+
+# Distancia mínima y máxima entre líneas
+d_min=700
+d_max=1000
+
+
+def detectar_carriles(frame):
+    global ultimas_lineas_izquierdas, ultimas_lineas_derechas, frames_sin_lineas_izquierdas, frames_sin_lineas_derechas, t_i, t_d, t
+
+    # Definición de la región de interés (ROI)
+    altura, ancho = frame.shape[:2]
+    puntos_roi = np.array([[(0.35 * ancho, 0.7 * altura), (0.55 * ancho, 0.7 * altura), (ancho * 1, altura * 0.95),
+                            (0 * ancho, altura * 0.95)]], dtype=np.int32)
+    puntos_roi_i = np.array([[(0.3 * ancho, 0.7 * altura), (0.5 * ancho, 0.7 * altura), (ancho * 0.5, altura * 0.95),
+                              (0.15 * ancho, altura * 0.95)]], dtype=np.int32)
+    puntos_roi_d = np.array([[(0.5 * ancho, 0.7 * altura), (0.6 * ancho, 0.7 * altura), (ancho * 0.85, altura * 0.95),
+                              (0.5 * ancho, altura * 0.95)]], dtype=np.int32)
+    mascara = np.zeros_like(frame)
+    cv2.fillPoly(mascara, puntos_roi_i, (255, 255, 255))
+    cv2.fillPoly(mascara, puntos_roi_d, (255, 255, 255))
+    frame_recortado = cv2.bitwise_and(frame, mascara)
+    imagen_roi = cv2.resize(frame_recortado, (960, 540))  # Redimensionamiento de la ROI
+    #cv2.imshow('Imagen', imagen_roi)
+
+    # Convertir imagen a escala de grises
+    imagen_gris = cv2.cvtColor(imagen_roi, cv2.COLOR_BGR2GRAY)
+    # cv2.imshow('Imagen', imagen_gris)
+
+    # Aplicar desenfoque gaussiano para reducir el ruido
+    imagen_desenfocada = cv2.GaussianBlur(imagen_gris, (5, 5), 0)
+    #cv2.imshow('Imagen', imagen_desenfocada)
+
+    ## Aplicación de ecualización del histograma
+    #imagen_ecualizada_i = cv2.equalizeHist(imagen_desenfocada[:, :960 // 2])
+    #imagen_ecualizada_d = cv2.equalizeHist(imagen_desenfocada[:, 960 // 2:])
+    #imagen_ecualizada = cv2.hconcat([imagen_ecualizada_i, imagen_ecualizada_d])
+    #cv2.imshow('Imagen', imagen_ecualizada)
+
+    # Función cúbica
+    #imagen_float_i = np.float32(imagen_ecualizada_i)
+    #f_cubica_i = (imagen_float_i ** 3) / (255 ** 2)
+    #imagen_f_cubica_i = cv2.normalize(f_cubica_i, None, 0, 255, cv2.NORM_MINMAX)
+    #imagen_f_cubica_i = np.uint8(imagen_f_cubica_i)
+
+    #imagen_float_d = np.float32(imagen_ecualizada_d)
+    #f_cubica_d = (imagen_float_d ** 3) / (255 ** 2)
+    #imagen_f_cubica_d = cv2.normalize(f_cubica_d, None, 0, 255, cv2.NORM_MINMAX)
+    #imagen_f_cubica_d = np.uint8(imagen_f_cubica_d)
+
+    #### Cambio:
+    imagen_f_cubica_i = imagen_desenfocada[:, :960 // 2]
+    imagen_f_cubica_d = imagen_desenfocada[:, 960 // 2:]
+
+
+    # Encuentra los puntos mínimo y máximo del histograma
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(imagen_f_cubica_i)
+    umbral1 = (max_val + np.mean(imagen_f_cubica_i)) / 2
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(imagen_f_cubica_d)
+    umbral2 = (max_val + np.mean(imagen_f_cubica_d)) / 2
+
+
+
+    # Aplica un umbral por separado a la mitad izquierda y derecha
+    _, imagen_f_cubica_i = cv2.threshold(imagen_f_cubica_i, umbral1, 255, cv2.THRESH_BINARY)
+    _, imagen_f_cubica_d = cv2.threshold(imagen_f_cubica_d, umbral2, 255, cv2.THRESH_BINARY)
+    # Une las imagenes umbralizadas
+    imagen_umbralizada = cv2.hconcat([imagen_f_cubica_i, imagen_f_cubica_d])
+    # Aplica una operación morfológica de apertura para eliminar los puntos blancos pequeños
+    imagen_umbralizada = cv2.morphologyEx(imagen_umbralizada, cv2.MORPH_OPEN, kernel=np.ones((2, 6), np.uint8))
+    #cv2.imshow('Imagen', imagen_umbralizada)
+
+    # Detectar bordes usando el operador de Canny
+    imagen_bordes = cv2.Canny(cv2.resize(imagen_umbralizada, (ancho, altura)), 50, 110)
+    #cv2.imshow('Imagen', imagen_bordes)
+
+    # Detectar líneas usando la transformada de Hough
+    lineas_i = cv2.HoughLinesP(imagen_bordes[:, :ancho // 2], 1, np.pi / 180, 50, minLineLength=50, maxLineGap=100)
+    lineas_d = cv2.HoughLinesP(imagen_bordes[:, ancho // 2:], 1, np.pi / 180, 50, minLineLength=50, maxLineGap=100)
+
+    # Separar las líneas en grupos izquierda y derecha
+    lineas_izquierdas = []
+    lineas_derechas = []
+
+    if lineas_i is not None:
+        linea_izq_falsa=False
+        for linea in lineas_i:
+            x1, y1, x2, y2 = linea[0]
+            if (x2 - x1) != 0:
+                pendiente = (y2 - y1) / (x2 - x1)
+                if pendiente < -0.45 or np.isinf(pendiente):
+                    lineas_izquierdas.append(linea[0])
+
+                    # Promediar las coordenadas de las líneas izquierda y derecha si se detectaron
+                    promedio_izquierdo = np.mean(lineas_izquierdas, axis=0, dtype=np.int32)
+
+                    # Histórico de las X últimas líneas
+                    ultimas_lineas_izquierdas.append(promedio_izquierdo)
+                    if len(ultimas_lineas_izquierdas) > N:
+                        ultimas_lineas_izquierdas.pop(0)  # Eliminar el primer elemento si hay más de X elementos
+    # Cambio:
+    else:
+        try:
+            x1, y1, x2, y2 = np.mean(ultimas_lineas_derechas, axis=0, dtype=np.int32) # Linea derecha
+            x1 = x1 - d_min - x1 + x2  # Hago el reflejo de la linea
+            x2 = x1 - d_min
+            linea = [x1, y1, x2, y2]
+            lineas_izquierdas.append(linea) # Linea izquierda = linea derecha invertida
+            promedio_izquierdo = np.mean(lineas_izquierdas, axis=0, dtype=np.int32)
+            #   Histórico de las X últimas líneas
+            ultimas_lineas_izquierdas.append(promedio_izquierdo)
+            ultimas_lineas_izquierdas.append(promedio_izquierdo)
+            cv2.line(frame, (x1, y1), (x2, y2), (255, 0, 0), 15)
+            linea_izq_falsa = True
+        except:
+            ultimas_lineas_izquierdas=[]
+
+
+    if lineas_d is not None:
+        linea_der_falsa=False
+        for linea in lineas_d:
+            x1, y1, x2, y2 = linea[0]
+            linea[0] = [x1 + ancho // 2, y1, x2 + ancho // 2, y2]
+            if (x2 - x1) != 0:
+                pendiente = (y2 - y1) / (x2 - x1)
+                if pendiente > 0.45 or np.isinf(pendiente):
+                    frames_sin_lineas_derechas = 0
+                    lineas_derechas.append(linea[0])
+
+                    promedio_derecho = np.mean(lineas_derechas, axis=0, dtype=np.int32)
+                    # Histórico de las X últimas líneas
+                    ultimas_lineas_derechas.append(promedio_derecho)
+                    if len(ultimas_lineas_derechas) > N:
+                        ultimas_lineas_derechas.pop(0)  # Eliminar el primer elemento si hay más de X elementos
+    #Cambio:
+    else:
+        try:
+            x1, y1, x2, y2 = np.mean(ultimas_lineas_izquierdas, axis=0, dtype=np.int32)
+            x2 = x1 + d_min + x1 - x2
+            x1 = x1 + d_min
+            linea[0] = [x1, y1, x2, y2]
+            lineas_derechas.append(linea[0])
+            promedio_derecho = np.mean(lineas_derechas, axis=0, dtype=np.int32)
+            #   Histórico de las X últimas líneas
+            ultimas_lineas_derechas.append(promedio_derecho)
+            ultimas_lineas_derechas.append(promedio_derecho)
+            cv2.line(frame, (x1, y1), (x2, y2), (255, 0, 0), 15)
+            linea_der_falsa = True
+
+        except:
+            ultimas_lineas_derechas=[]
+
+
+
+
+
+    if not lineas_izquierdas != []:
+        if len(ultimas_lineas_izquierdas) > 0:
+            ultimas_lineas_izquierdas.pop(0)
+    if ultimas_lineas_izquierdas != [] or linea_izq_falsa==True:
+        x1, y1, x2, y2 = np.mean(ultimas_lineas_izquierdas, axis=0, dtype=np.int32)
+        # Extender las líneas solo dentro del rango de la ROI
+        pendiente = (y2 - y1) / (x2 - x1) if x2 != x1 else float('inf')  # Manejar caso de pendiente infinita
+        if pendiente != 0:  # Evitar división por cero
+            y1_left = int(altura * 0.75)
+            y2_left = int(altura * 0.95)
+            x1_left = int((y1_left - y1) / pendiente + x1)
+            x2_left = int((y2_left - y1) / pendiente + x1)
+            cv2.line(frame, (x1_left, y1_left), (x2_left, y2_left), (255, 0, 255), 15)
+        # Cambio:
+        else:
+            ultimas_lineas_izquierdas = []
+
+    if not lineas_derechas != []:
+        if len(ultimas_lineas_derechas) > 0:
+            ultimas_lineas_derechas.pop(0)
+    if ultimas_lineas_derechas != [] or linea_der_falsa==True:
+        x1, y1, x2, y2 = np.mean(ultimas_lineas_derechas, axis=0, dtype=np.int32)
+        # Extender las líneas solo dentro del rango de la ROI
+        pendiente = (y2 - y1) / (x2 - x1) if x2 != x1 else float('inf')  # Manejar caso de pendiente infinita
+        if pendiente != 0:  # Evitar división por cero
+            y1_right = int(altura * 0.75)
+            y2_right = int(altura * 0.95)
+            x1_right = int((y1_right - y1) / pendiente + x1)
+            x2_right = int((y2_right - y1) / pendiente + x1)
+            cv2.line(frame, (x1_right, y1_right), (x2_right, y2_right), (255, 0, 255), 15)
+        #Cambio:
+        else:
+            ultimas_lineas_derechas=[]
+
+
+
+
+    # Dibujar carril
+    if len(ultimas_lineas_derechas) > 0 and len(ultimas_lineas_izquierdas) > 0:
+
+        x_sup_mid = int((x1_left + x1_right) * 0.5)
+        x_inf_mid = int((x2_left + x2_right) * 0.5)
+        cv2.line(frame, (x_sup_mid, y1_left), (x_inf_mid, y2_left), (255, 0, 255), 2)
+
+        frame_cpy = frame.copy()
+        cv2.fillPoly(frame,
+                     np.array([[(x1_left, y1_left), (x1_right, y1_right), (x2_right, y2_right), (x2_left, y2_left)]],
+                              dtype=np.int32), color=(255, 0, 255))
+        alpha = 0.4
+        frame = cv2.addWeighted(frame, alpha, frame_cpy, 1 - alpha, gamma=0)
+
+        '''
+        if (x_inf_mid-x2_left)>=500 and (x2_right-x_inf_mid)>=500:
+            frame_cpy = frame.copy()
+            cv2.fillPoly(frame, np.array([[(x1_left, y1_left), (x1_right, y1_right), (x2_right, y2_right), (x2_left, y2_left)]], dtype=np.int32), color=(255, 0, 255))
+            alpha = 0.4
+            frame = cv2.addWeighted(frame, alpha, frame_cpy, 1 - alpha, gamma=0)
+
+        if (x_inf_mid-x2_left)>550:
+            t_i+=1
+        else:
+            t_i=0 
+        if t_i>10:
+            frame_cpy = frame.copy()
+            cv2.fillPoly(frame, np.array([[(x1_left, y1_left), (x1_right, y1_right), (x2_right, y2_right), (x2_left, y2_left)]], dtype=np.int32), color=(0, 0, 255))
+            alpha = 0.4
+            frame = cv2.addWeighted(frame, alpha, frame_cpy, 1 - alpha, gamma=0)
+
+            cv2.putText(frame,'CAUTION', 
+            (int(ancho*0.25),int(altura*0.1)), #bottomLeftCornerOfText
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            3, #fontScale
+            (0,0,255), #fontColor
+            5, #thickness
+            2) #lineType
+
+        if (x2_right-x_inf_mid)>550:
+            t_d+=1
+        else:
+            t_d=0 
+        if t_d>10:
+            frame_cpy = frame.copy()
+            cv2.fillPoly(frame, np.array([[(x1_left, y1_left), (x1_right, y1_right), (x2_right, y2_right), (x2_left, y2_left)]], dtype=np.int32), color=(0, 0, 255))
+            alpha = 0.4
+            frame = cv2.addWeighted(frame, alpha, frame_cpy, 1 - alpha, gamma=0)
+
+            cv2.putText(frame,'CAUTION', 
+            (int(ancho*0.25),int(altura*0.1)), #bottomLeftCornerOfText
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            3, #fontScale
+            (0,0,255), #fontColor
+            5, #thickness
+            2) #lineType
+            '''
+        t = 0
+
+    else:
+        t += 1
+        if t > 10:
+            frame_cpy = frame.copy()
+            cv2.fillPoly(frame, puntos_roi, color=(0, 0, 255))
+            alpha = 0.4
+            frame = cv2.addWeighted(frame, alpha, frame_cpy, 1 - alpha, gamma=0)
+
+            cv2.putText(frame, 'CAUTION',
+                        (int(ancho * 0.25), int(altura * 0.1)),  # bottomLeftCornerOfText
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        3,  # fontScale
+                        (0, 0, 255),  # fontColor
+                        5,  # thickness
+                        2)  # lineType
+
+    return frame
+
+
+# Obtener la ruta del directorio actual donde se encuentra el archivo de Python
+ruta_actual = os.path.dirname(os.path.abspath(__file__))
+
+# Unir la ruta actual con el nombre del video
+video_ruta = os.path.join(ruta_actual, 'video.mp4')
+
+# Capturar video desde el archivo de video
+cap = cv2.VideoCapture(video_ruta)
+
+# Crear una ventana para mostrar las imágenes
+cv2.namedWindow('Reproduccion', cv2.WINDOW_NORMAL)
+
+while cap.isOpened():
+    # Capturar frame a frame
+    ret, frame = cap.read()
+    if ret:
+        frame_con_carriles = detectar_carriles(frame)
+
+        # Mostrar la imagen en la ventana 'Reproduccion'
+        cv2.imshow('Reproduccion', frame_con_carriles)
+
+        if cv2.waitKey(1) == ord('s'):
+            break
+    else:
+        break
+
+# Liberar la captura de video y cerrar todas las ventanas
+cap.release()
+cv2.destroyAllWindows()
