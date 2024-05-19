@@ -9,10 +9,12 @@ frames_sin_lineas_derechas = 0
 # Listas para almacenar las líneas de los últimos 10 frames
 ultimas_lineas_izquierdas = []
 ultimas_lineas_derechas = []
+timer = 0
 
+puntos_roni = np.empty((1,4,2), dtype=np.int32)
 
 def detectar_carriles(frame,estado,Q,P,R,K):
-    global ultimas_lineas_izquierdas, ultimas_lineas_derechas, frames_sin_lineas_izquierdas, frames_sin_lineas_derechas
+    global ultimas_lineas_izquierdas, ultimas_lineas_derechas, frames_sin_lineas_izquierdas, frames_sin_lineas_derechas, puntos_roni, timer
 
     A = np.array([
         [1,0,0,0,1,0],
@@ -87,6 +89,8 @@ def detectar_carriles(frame,estado,Q,P,R,K):
     puntos_roi = np.array([[(ancho * x, altura * y) for x, y in ROI_VERTICES]], dtype=np.int32)
     mascara = np.zeros_like(gris)
     cv2.fillPoly(mascara, puntos_roi, 255)
+    if puntos_roni.size!=0:
+        cv2.fillPoly(mascara, puntos_roni, 0)
     imagen_roi = cv2.bitwise_and(bordes, mascara)
 
     # Detectar líneas usando la transformada de Hough
@@ -161,6 +165,7 @@ def detectar_carriles(frame,estado,Q,P,R,K):
         xdraw_derecha_sup = int((ydraw_derecha_sup - y1) / pendiente_derecha + x1)
         #cv2.line(frame, (xdraw_derecha_inf, ydraw_derecha_inf), (xdraw_derecha_sup, ydraw_derecha_sup), (0, 255, 255), 5)
 
+    
     medida = [x_izquierda_inf, x_izquierda_sup, x_derecha_inf, x_derecha_sup]
     #print("medida: ", medida)
 
@@ -177,6 +182,8 @@ def detectar_carriles(frame,estado,Q,P,R,K):
     pendiente_izquierda = (y2 - y1) / (x2 - x1) if x2 != x1 else float('inf')
     #print("pendiente_izquierda: ", pendiente_izquierda)
     if pendiente_izquierda != 0:  # Evitar división por cero
+        x_izquierda_inf = int((altura - y1) / pendiente_izquierda + x1)
+        x_izquierda_sup = int((0 - y1) / pendiente_izquierda + x1)
         ydraw_izquierda_inf = int(altura * 0.95)
         xdraw_izquierda_inf = int((ydraw_izquierda_inf - y1) / pendiente_izquierda + x1)
         ydraw_izquierda_sup = int(altura * 0.75)
@@ -190,6 +197,8 @@ def detectar_carriles(frame,estado,Q,P,R,K):
     pendiente_derecha = (y2 - y1) / (x2 - x1) if x2 != x1 else float('inf')
     #print("pendiente_derecha: ", pendiente_derecha)
     if pendiente_derecha != 0:  # Evitar división por cero
+        x_derecha_inf = int((altura - y1) / pendiente_derecha + x1)
+        x_derecha_sup = int((0 - y1) / pendiente_derecha + x1)
         ydraw_derecha_inf = int(altura * 0.95)
         xdraw_derecha_inf = int((ydraw_derecha_inf - y1) / pendiente_derecha + x1)
         ydraw_derecha_sup = int(altura * 0.75)
@@ -197,6 +206,16 @@ def detectar_carriles(frame,estado,Q,P,R,K):
         cv2.line(frame, (xdraw_derecha_inf, ydraw_derecha_inf),
                 (xdraw_derecha_sup, ydraw_derecha_sup), (255, 0, 255), 5)
         vertices=np.concatenate((vertices, np.array([[xdraw_derecha_inf,ydraw_derecha_inf],[xdraw_derecha_sup,ydraw_derecha_sup]])))
+
+
+    ancho_sup = xdraw_derecha_sup - xdraw_izquierda_sup
+    ancho_inf = xdraw_derecha_inf - xdraw_izquierda_inf
+    puntos_roni = np.array([[
+        [xdraw_izquierda_sup + ancho_sup*0.2, ydraw_izquierda_sup],
+        [xdraw_derecha_sup - ancho_sup*0.2, ydraw_derecha_sup],
+        [xdraw_derecha_inf - ancho_inf*0.2, ydraw_derecha_inf],
+        [xdraw_izquierda_inf + ancho_inf*0.2, ydraw_izquierda_inf]
+        ]], dtype=np.int32)
 
     # Dibujar carril
     frame_cpy = frame.copy()
@@ -298,12 +317,19 @@ def detectar_carriles(frame,estado,Q,P,R,K):
 
     x_sup_mid = int((x_sup_izq+x_sup_der)*0.5)
     x_inf_mid = int((x_inf_izq+x_inf_der)*0.5)
-    cv2.line(frame, (x_sup_mid, interseccion_superior),
-                (x_inf_mid, interseccion_inferior), (255, 0, 255), 1)
-    
-    offset = x_inf_mid - int(ancho/2) + 70 # ajustar según vídeo
-    #print(offset)
-    if abs(offset)>200:
+    cv2.line(frame, (x_sup_mid, interseccion_superior), (x_inf_mid, interseccion_inferior), (255, 0, 255), 1)
+    """
+    xdraw_mid_sup = int((xdraw_izquierda_sup+xdraw_derecha_sup)*0.5)
+    xdraw_mid_inf = int((xdraw_izquierda_inf+xdraw_derecha_inf)*0.5)
+    cv2.line(frame, (xdraw_mid_sup, ydraw_izquierda_sup), (xdraw_mid_inf, ydraw_izquierda_inf), (255, 0, 255), 1)
+    offset = xdraw_mid_inf - int(ancho/2) # ajustar según vídeo
+    offset_threshold = 400
+    print("offset: ", offset)
+    if abs(offset)>offset_threshold or timer>0:
+        if abs(offset)>offset_threshold:
+            timer = 20 # ajustar timer
+        else:
+            timer = timer - 1
         cv2.putText(frame,'CAMBIO DE CARRIL', 
             (int(ancho*0.25),int(altura*0.1)), #bottomLeftCornerOfText
             cv2.FONT_HERSHEY_SIMPLEX, 
@@ -311,15 +337,17 @@ def detectar_carriles(frame,estado,Q,P,R,K):
             (0,255,255), #fontColor
             5, #thickness
             2) #lineType 
-    """
+
 
     # Dibujar la zona de interés con una línea discontínua verde
-    cv2.polylines(frame, [puntos_roi], isClosed=True, color=(0, 255, 0), thickness=2)
+    #cv2.polylines(frame, [puntos_roi], isClosed=True, color=(0, 255, 0), thickness=1)
+    # Dibujar la zona de no interés dentro de la zona de interés con una línea discontínua verde
+    #if puntos_roni.size!=0:
+    #    cv2.polylines(frame, [puntos_roni], isClosed=True, color=(0, 255, 0), thickness=1)
 
     
 
     return frame, estado, P, K
-
 # Obtener la ruta del directorio actual donde se encuentra el archivo de Python
 ruta_actual = os.path.dirname(os.path.abspath(__file__))
 
@@ -343,17 +371,10 @@ while init:
 estado = [404, 1834, 1671, -583, 0, 0]
 ultimas_lineas_izquierdas.append([244, altura, 2040, 0])
 ultimas_lineas_derechas.append([1483, altura, -317, 0])
-Q = np.eye(6)*0.00001
+Q = np.eye(6)*0.001
 P = np.eye(6)*0.01
 R = np.eye(4)*25
-K = np.array([
-    [0.001,0.001,0.001,0.001],
-    [0.001,0.001,0.001,0.001],
-    [0.001,0.001,0.001,0.001],
-    [0.001,0.001,0.001,0.001],
-    [0.001,0.001,0.001,0.001],
-    [0.001,0.001,0.001,0.001]
-])
+K = np.ones((6,4))*0.001
 
 while cap.isOpened():
     # Capturar frame a frame
