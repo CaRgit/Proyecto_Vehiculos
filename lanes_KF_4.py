@@ -206,7 +206,7 @@ def detectar_carriles(frame,estado,Q,P,R,K):
         for linea in lineas_izquierdas:
             x_inf,y_inf,x_sup,y_sup = linea[0]
             e_inf = x_inf - estado_estimado[0] # error entre la x inferior de la linea y la x inferior predicha por el modelo
-            e_sup = x_sup - estado_estimado[2] # error entre la x superior de la linea y la x superior predicha por el modelo
+            e_sup = x_sup - estado_estimado[1] # error entre la x superior de la linea y la x superior predicha por el modelo
             if (e_inf >= 0 and e_sup >= 0) or (e_inf < 0 and e_sup < 0):
                 em = abs((e_inf)+(e_sup)/2*(y_inf-y_sup)) # integral del error
             else:
@@ -231,8 +231,8 @@ def detectar_carriles(frame,estado,Q,P,R,K):
         em_min = float('inf') # error medio con respecto a la linea predicha por el modelo
         for linea in lineas_derechas:
             x_inf,y_inf,x_sup,y_sup = linea[0]
-            e_inf = x_inf - estado_estimado[0] # error entre la x inferior de la linea y la x inferior predicha por el modelo
-            e_sup = x_sup - estado_estimado[2] # error entre la x superior de la linea y la x superior predicha por el modelo
+            e_inf = x_inf - estado_estimado[2] # error entre la x inferior de la linea y la x inferior predicha por el modelo
+            e_sup = x_sup - estado_estimado[3] # error entre la x superior de la linea y la x superior predicha por el modelo
             if (e_inf >= 0 and e_sup >= 0) or (e_inf < 0 and e_sup < 0):
                 em = abs((e_inf)+(e_sup)/2*(y_inf-y_sup)) # integral del error
             else:
