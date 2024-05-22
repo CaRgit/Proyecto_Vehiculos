@@ -73,7 +73,6 @@ def detectar_carriles(frame,estado,Q,P,R,K):
         estado_estimado[3] = estado_estimado[1]
         estado_estimado[0] = estado_estimado[2]-ancho_inf_ini
         estado_estimado[1] = estado_estimado[3]-ancho_sup_ini
-        estado_estimado[5] = estado_estimado[4]
 
     elif xpunto_inf < 0 and xpunto_sup < 0 and abs(pendiente_d) > 10:
         # cambio al carril de la derecha
@@ -82,7 +81,6 @@ def detectar_carriles(frame,estado,Q,P,R,K):
         estado_estimado[1] = estado_estimado[3]
         estado_estimado[2] = estado_estimado[0]+ancho_inf_ini
         estado_estimado[3] = estado_estimado[1]+ancho_sup_ini
-        estado_estimado[4] = estado_estimado[5]
 
     x_izquierda_inf, x_izquierda_sup, x_derecha_inf, x_derecha_sup = [estado_estimado[0],estado_estimado[1],estado_estimado[2],estado_estimado[3]]
     x_inf_mid = (x_izquierda_inf+x_derecha_inf)*0.5
