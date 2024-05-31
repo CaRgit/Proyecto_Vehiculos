@@ -6,31 +6,26 @@ estado_ini = [500, 800, 1500, 1150, 0, 0]
 ancho_inf_ini = estado_ini[2]-estado_ini[0]
 ancho_sup_ini = estado_ini[3]-estado_ini[1]
 
-A = np.array([
-    [1,0,0,0,1,0],
-    [0,1,0,0,0,1],
-    [0,0,1,0,1,0],
-    [0,0,0,1,0,1],
-    [0,0,0,0,1,0],
-    [0,0,0,0,0,1]
-])
+A = np.array([[1,0,0,0,1,0],
+              [0,1,0,0,0,1],
+              [0,0,1,0,1,0],
+              [0,0,0,1,0,1],
+              [0,0,0,0,1,0],
+              [0,0,0,0,0,1]])
 
-C = np.array([
-    [1,0,0,0,0,0],
-    [0,1,0,0,0,0],
-    [0,0,1,0,0,0],
-    [0,0,0,1,0,0],
-    [1,0,0,0,0,0],
-    [0,1,0,0,0,0],
-    [0,0,1,0,0,0],
-    [0,0,0,1,0,0],
-    [1,0,0,0,0,0],
-    [0,1,0,0,0,0],
-    [0,0,1,0,0,0],
-    [0,0,0,1,0,0]
-    ])
+C = np.array([[1,0,0,0,0,0],
+              [0,1,0,0,0,0],
+              [0,0,1,0,0,0],
+              [0,0,0,1,0,0],
+              [1,0,0,0,0,0],
+              [0,1,0,0,0,0],
+              [0,0,1,0,0,0],
+              [0,0,0,1,0,0],
+              [1,0,0,0,0,0],
+              [0,1,0,0,0,0],
+              [0,0,1,0,0,0],
+              [0,0,0,1,0,0]])
 
-#Q_ini = np.eye(6)*0.001
 Q_ini = np.diag(np.concatenate(([0.001]*4, [0.0001]*2))) # confianza en el modelo
 Q_ini[(4,5)]=0.8*Q_ini[(4,5)]*Q_ini[(5,4)]
 Q_ini[(5,4)]=Q_ini[(4,5)]
@@ -62,10 +57,6 @@ def detectar_carriles(frame,estado,Q,P,R,K):
     pendiente_d = (y2 - y1) / (x2 - x1) if x2 != x1 else float('inf')  # Manejar caso de pendiente infinita
 
     xpunto_inf, xpunto_sup = [estado[4],estado[5]]
-    #print("xpunto_inf: ", xpunto_inf)
-    #print("xpunto_sup: ", xpunto_sup)
-
-
     if xpunto_inf > 0 and xpunto_sup > 0 and abs(pendiente_i) > 10:
         # cambio al carril de la izquierda:
         # la linea de la derecha hereda las caracteristicas de la que era la linea de la izquierda
@@ -319,10 +310,6 @@ def detectar_carriles(frame,estado,Q,P,R,K):
             t_d-=1
         if t_i>0:
             t_i-=1
-    
-    # Dibujar la zona de interés con una línea discontínua verde
-    #cv2.polylines(frame, [puntos_roi], isClosed=True, color=(0, 255, 0), thickness=2)
-
 
     return frame, estado, P, K
 
@@ -358,7 +345,6 @@ R = R_ini
 K = K_ini
 
 while cap.isOpened():
-    # Capturar frame a frame
     ret, frame = cap.read()
     if ret:
         frame_con_carriles, estado, P, K = detectar_carriles(frame,estado,Q,P,R,K)
